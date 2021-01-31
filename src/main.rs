@@ -1,3 +1,5 @@
+use bitbuffer::{BitReadBuffer, BitWriteStream, LittleEndian};
+use crc::crc32;
 use std::{
     collections::HashMap,
     convert::TryInto,
@@ -7,9 +9,23 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-mod state;
+struct Client {
+    reliable: u8
+}
 
-use state::State;
+impl Client {
+    /// Flip a bit in the reliable state
+    pub fn flip_rel(&mut self, n: usize) {
+        self.reliable ^= 1 << n;
+    }
+
+    /// Create a new client state
+    pub fn new() -> Self {
+        Self {
+            reliable: 0
+        }
+    }
+}
 
 fn generate_challenge() -> u32 {
     let now = SystemTime::now()
@@ -19,7 +35,7 @@ fn generate_challenge() -> u32 {
     (now & 0xFFFFFFFF).try_into().unwrap()
 }
 
-fn handle_stateless(sock: &mut UdpSocket, addr: SocketAddr, data: &[u8]) -> Option<u8> {
+fn handle_stateless(sock: &mut UdpSocket, addr: SocketAddr, data: &[u8]) -> u8 {
     let mut response = Vec::new();
     match data[4] {
         0x54 => {
@@ -27,14 +43,10 @@ fn handle_stateless(sock: &mut UdpSocket, addr: SocketAddr, data: &[u8]) -> Opti
             response.extend_from_slice(&[0xFF, 0xFF, 0xFF, 0xFF]);
             response.push(0x49); // Type
             response.push(0x11); // Protocol version
-            response.extend_from_slice("Community Matchmaking Testing".as_bytes()); // Server name
-            response.push(0);
-            response.extend_from_slice("matchmaking".as_bytes());
-            response.push(0);
-            response.extend_from_slice("tf".as_bytes()); // Game folder
-            response.push(0);
-            response.extend_from_slice("Team Fortress 2".as_bytes()); // Game name
-            response.push(0);
+            response.extend_from_slice("Community Matchmaking Testing\0".as_bytes()); // Server name
+            response.extend_from_slice("matchmaking\0".as_bytes());
+            response.extend_from_slice("tf\0".as_bytes()); // Game folder
+            response.extend_from_slice("Team Fortress 2\0".as_bytes()); // Game name
             response.extend_from_slice(&440u16.to_le_bytes()); // Game ID
             response.push(0); // Number of players
             response.push(24); // Max players
@@ -43,12 +55,10 @@ fn handle_stateless(sock: &mut UdpSocket, addr: SocketAddr, data: &[u8]) -> Opti
             response.push(0x6C); // Server environment(Linux)
             response.push(0); // Server visibility(Public)
             response.push(0); // VAC Support(Disabled)
-            response.extend_from_slice("0".as_bytes()); // Game version
-            response.push(0);
+            response.extend_from_slice("0\0".as_bytes()); // Game version
             response.push(0xA1); // Extra Data Flags
             response.extend_from_slice(&27015u16.to_le_bytes()); // Port number
-            response.extend_from_slice("breadpudding,matchmaking".as_bytes()); // Keywords
-            response.push(0);
+            response.extend_from_slice("breadpudding,matchmaking\0".as_bytes()); // Keywords
             response.extend_from_slice(&440u64.to_le_bytes()); // Game ID
         }
         0x55 => {
@@ -97,163 +107,160 @@ fn handle_stateless(sock: &mut UdpSocket, addr: SocketAddr, data: &[u8]) -> Opti
             response.extend_from_slice(&0u16.to_le_bytes()); // Steam2 Encryption Key
             response.extend_from_slice(&0u64.to_le_bytes()); // Steam ID
             response.push(1); // SteamServer Secure
-            response.extend_from_slice("000000".as_bytes()); // Padding
-            response.push(0);
+            response.extend_from_slice("000000\0".as_bytes()); // Padding
         }
         _ => {}
     }
     if response.len() > 0 {
         sock.send_to(&response, addr).unwrap();
     }
-    Some(data[4])
-}
-
-fn read_bit(data: &[u8], idx: &mut usize) -> bool {
-    let victim = data[*idx >> 3] & (1 << (*idx & 3));
-    *idx += 1;
-    victim != 0
-}
-
-fn read_bits(data: &[u8], idx: &mut usize, n: usize) -> usize {
-    let mut result = 0;
-    for _ in 0..n {
-        result = (result << 1) | (read_bit(data, idx) as usize);
-    }
-    result
-}
-
-fn read_bytes(data: &[u8], idx: &mut usize, n: usize) -> Vec<u8> {
-    let mut result = Vec::new();
-    for _ in 0..n {
-        result.push(read_bits(data, idx, 8) as u8);
-    }
-    result
-}
-
-fn read_varint(data: &[u8], idx: &mut usize) -> usize {
-    let mut count = 0;
-    let mut result = 0;
-    while {
-        let temp = read_bits(data, idx, 8);
-        result |= (temp & 0x7F) << (7 * count);
-        count += 1;
-        (temp & 0x80) != 0
-    } {}
-    result
+    data[4]
 }
 
 fn handle_stateful(
-    states: &mut HashMap<SocketAddr, State>,
+    clients: &mut HashMap<SocketAddr, Client>,
     sock: &mut UdpSocket,
     addr: SocketAddr,
     data: &[u8],
 ) {
-    let (state, new) = match states.get_mut(&addr) {
-        Some(state) => (state, false),
+    // Get the client/victim
+    let victim = match clients.get_mut(&addr) {
+        Some(victim) => victim,
         None => {
-            states.insert(addr, State::new());
-            (states.get_mut(&addr).unwrap(), true)
+            // Welcome our client to netchannel
+            let mut buffer = Vec::new();
+            buffer.extend_from_slice(&[0xFF, 0xFF, 0xFF, 0xFF]);
+            buffer.push(0x42); // Type
+            buffer.extend_from_slice("00000000000000\0".as_bytes()); // Padding
+            sock.send_to(&buffer, addr).unwrap();
+            // Create the client state since one doesn't exist
+            clients.insert(addr, Client::new());
+            clients.get_mut(&addr).unwrap()
         }
     };
-    // Send our last stateless packet if this is a new connection
-    if new {
-        let mut buffer = Vec::new();
-        buffer.extend_from_slice(&[0xFF, 0xFF, 0xFF, 0xFF]);
-        buffer.push(0x42); // Type
-        buffer.extend_from_slice("00000000000000\0".as_bytes()); // Padding
-        sock.send_to(&buffer, addr).unwrap();
-    }
-    let mut response = Vec::new();
-    let mut idx = 0; // Bit index
-    let mut off = 12; // Subchannel offset
-    let seq = u32::from_le_bytes(data[0..4].try_into().unwrap()); // Packet sequence
-    let ack = u32::from_le_bytes(data[4..8].try_into().unwrap()); // Acknowledged sequence
+    // Read header data
+    let seq = u32::from_le_bytes(data[0..4].try_into().unwrap());
+    let ack = u32::from_le_bytes(data[4..8].try_into().unwrap());
     let flags = data[8];
     let checksum = u16::from_le_bytes(data[9..11].try_into().unwrap());
-    state.set_rel(data[11]); // Set the client's relative state
-    if flags & 0x10 != 0 {
-        // Check if the choked flag is set
-        // TODO: Handle choked packets
-        off += 1;
-        todo!()
-    }
-    if flags & 0x20 != 0 {
-        // Check if we are being challenged
-        // TODO: Don't skip the challenge
-        off += 4;
-        // We're ignoring this for now
-    }
-    // Check if we have subchannel data
-    if flags & 0x01 != 0 {
-        // Grab just the subchannel data
-        let sub = &data[off..];
-        // Update our reliable state
-        state.flip_rel(read_bits(sub, &mut idx, 3));
-        // Does the data exist?
-        if read_bit(sub, &mut idx) {
-            // Is the data fragmented?
-            if read_bit(sub, &mut idx) {
+    // Verify the checksum before we continue
+    if valve_checksum(&data[11..]) == checksum {
+        let rel = data[11];
+        let mut off = 12;
+        let choked = if flags & 0x10 != 0 {
+            off += 1;
+            Some(data[12])
+        } else {
+            None
+        };
+        let challenge = if flags & 0x20 != 0 {
+            off += 4;
+            Some(u32::from_le_bytes(data[(off - 4)..off].try_into().unwrap()))
+        } else {
+            None
+        };
+        if flags & 0x01 != 0 {
+            // Set up the bit reader/writer
+            let reader = BitReadBuffer::new(&data[off..], LittleEndian);
+            let writer = BitWriteStream::new(LittleEndian);
+            // Check which bit in the reliable state we need to flip
+            victim.flip_rel(reader.read_int(0, 3).unwrap());
+            // Check if data exists
+            if reader.read_bool(3).unwrap() {
+                let mut idx = 6;
+                // Is this part of a multi-block structure?
+                let multi = reader.read_bool(4).unwrap();
+                println!("DEBUG: {:?}", multi);
                 // Is the data compressed?
-                if read_bit(sub, &mut idx) {
-                    // TODO: Read compressed subchannel data
-                    todo!()
+                let compressed = if reader.read_bool(5).unwrap() {
+                    idx += 26;
+                    Some(reader.read_int::<u32>(idx - 26, 26).unwrap())
                 } else {
-                    let len = read_varint(data, &mut idx);
-                    let subdata = read_bytes(data, &mut idx, len);
-                    println!("{:?}", subdata);
-                    // ...
-                    todo!()
-                }
-            } else {
-                // TODO: Read fragmented subchannel data
-                todo!()
+                    None
+                };
+                println!("DEBUG: {:?}", compressed);
+                // What is the length of the message?
+                let len = read_varint(&mut idx, &reader);
+                // Finally, the message itself.
+                let msg = reader.read_bytes(idx, len).unwrap();
+                println!("DEBUG: {:?}", msg);
+                // ...
             }
         }
     }
-    sock.send_to(&response, addr).unwrap();
+}
+
+enum RequestType {
+    Unknown,
+    Stateless(u8),
+    Stateful,
 }
 
 fn handle_request(
-    state: &mut HashMap<SocketAddr, State>,
+    clients: &mut HashMap<SocketAddr, Client>,
     sock: &mut UdpSocket,
     addr: SocketAddr,
     data: &[u8],
-) -> Option<u8> {
+) -> RequestType {
     if data.len() > 4 {
         let header = u32::from_le_bytes(data[0..4].try_into().unwrap());
         if header == 0xFFFFFFFF {
-            handle_stateless(sock, addr, data)
+            RequestType::Stateless(handle_stateless(sock, addr, data))
         } else if header != 0xFFFFFFFE {
-            handle_stateful(state, sock, addr, data);
-            None
+            handle_stateful(clients, sock, addr, data);
+            RequestType::Stateful
         } else {
-            None
+            RequestType::Unknown
         }
     } else {
-        None
+        RequestType::Unknown
     }
 }
 
 fn main() {
+    let mut clients = HashMap::<SocketAddr, Client>::new();
     let mut log = OpenOptions::new().append(true).open("log.csv").unwrap();
     let mut sock = UdpSocket::bind("0.0.0.0:27015").unwrap();
-    let mut state = HashMap::<SocketAddr, State>::new();
     loop {
         let mut buffer = vec![0; 1400];
         if let Ok((len, addr)) = sock.recv_from(&mut buffer) {
             let start = SystemTime::now();
-            let kind = handle_request(&mut state, &mut sock, addr, &buffer[..len]);
+            let kind = handle_request(&mut clients, &mut sock, addr, &buffer[..len]);
             let time = SystemTime::now().duration_since(start).unwrap().as_micros();
             match kind {
-                Some(kind) => {
-                    println!("{}: Request({:#0x}) took {}\u{00B5}s", addr, kind, time);
+                RequestType::Stateless(kind) => {
+                    println!("{}: Stateless request({:#0x}) took {}\u{00B5}s", addr, kind, time);
                     write!(log, "{},{:#0x},{}\n", addr, kind, time).unwrap();
                 }
-                None => {
+                RequestType::Stateful => {
+                    println!("{}: Stateful request took {}\u{00B5}s", addr, time);
+                    write!(log, "{},,{}\n", addr, time).unwrap();
+                }
+                RequestType::Unknown => {
                     println!("{}: Unknown request took {}\u{00B5}s", addr, time);
                     write!(log, "{},,{}\n", addr, time).unwrap();
                 }
             }
         }
     }
+}
+
+fn read_varint(idx: &mut usize, reader: &BitReadBuffer<LittleEndian>) -> usize {
+    let mut count = 0;
+    let mut result = 0;
+    while {
+        let temp = reader.read_int::<usize>(*idx, 8).unwrap();
+        result |= (temp & 0x7F) << (7 * count);
+        count += 1;
+        *idx += 8;
+        (temp & 0x80) != 0
+    } {}
+    result
+}
+
+fn valve_checksum(data: &[u8]) -> u16 {
+    let mut result = crc32::checksum_ieee(data);
+    result ^= result >> 16;
+    result &= 0xFFFF;
+    result as u16
 }
