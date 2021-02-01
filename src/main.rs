@@ -190,19 +190,24 @@ fn handle_stateful(
     // Attempt a stringcmd write
     //let string_cmd = [&[00], &[4u8] as &[u8], b"redirect", &[0]].concat(); // 4 (6 bits) + "redirect";
     let mut writer = BitWriteStream::new(LittleEndian);
-    writer.write_int(0u8, 8).unwrap();
-    writer.write_int(4u8, 6).unwrap();
-    writer.write_bytes(b"redirect 192.168.0.2:27015").unwrap();
-    writer.write_bytes(&[0]).unwrap();
+    writer.write_int(0u8, 8).unwrap(); // Reliable state
+    writer.write_int(4u8, 6).unwrap(); // NET_StringCmd
+    writer.write_bytes(b"redirect 192.168.0.2:27015").unwrap(); // Command
+    writer.write_bytes(&[0]).unwrap(); // NULL
 
-    let string_cmd = writer.finish();
+    let payload = writer.finish();
 
     let message = [
+        // SEQ
         &0u32.to_le_bytes() as &[u8],
+        // ACK
         &0u32.to_le_bytes(),
+        // Flags
         &[0x00],
-        &valve_checksum(&string_cmd).to_le_bytes(),
-        &string_cmd,
+        // Checksum
+        &valve_checksum(&payload).to_le_bytes(),
+        // Payload
+        &payload,
     ]
     .concat();
 
