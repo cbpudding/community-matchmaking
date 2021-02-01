@@ -10,7 +10,7 @@ use std::{
 };
 
 struct Client {
-    reliable: u8
+    reliable: u8,
 }
 
 impl Client {
@@ -21,9 +21,7 @@ impl Client {
 
     /// Create a new client state
     pub fn new() -> Self {
-        Self {
-            reliable: 0
-        }
+        Self { reliable: 0 }
     }
 }
 
@@ -188,6 +186,27 @@ fn handle_stateful(
             }
         }
     }
+
+    // Attempt a stringcmd write
+    //let string_cmd = [&[00], &[4u8] as &[u8], b"redirect", &[0]].concat(); // 4 (6 bits) + "redirect";
+    let mut writer = BitWriteStream::new(LittleEndian);
+    writer.write_int(0u8, 8).unwrap();
+    writer.write_int(4u8, 6).unwrap();
+    writer.write_bytes(b"redirect 192.168.0.2:27015").unwrap();
+    writer.write_bytes(&[0]).unwrap();
+
+    let string_cmd = writer.finish();
+
+    let message = [
+        &0u32.to_le_bytes() as &[u8],
+        &0u32.to_le_bytes(),
+        &[0x00],
+        &valve_checksum(&string_cmd).to_le_bytes(),
+        &string_cmd,
+    ]
+    .concat();
+
+    sock.send_to(&message, addr).unwrap();
 }
 
 enum RequestType {
@@ -229,7 +248,10 @@ fn main() {
             let time = SystemTime::now().duration_since(start).unwrap().as_micros();
             match kind {
                 RequestType::Stateless(kind) => {
-                    println!("{}: Stateless request({:#0x}) took {}\u{00B5}s", addr, kind, time);
+                    println!(
+                        "{}: Stateless request({:#0x}) took {}\u{00B5}s",
+                        addr, kind, time
+                    );
                     write!(log, "{},{:#0x},{}\n", addr, kind, time).unwrap();
                 }
                 RequestType::Stateful => {
