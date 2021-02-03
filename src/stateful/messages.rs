@@ -1,11 +1,12 @@
 use bitbuffer::{BitReadStream, LittleEndian};
+use std::{collections::HashMap, mem};
 
 #[derive(Debug)]
 #[allow(non_camel_case_types)]
 pub enum Messages {
     NET_NOP,
     NET_DISCONNECT { reason: String },
-    NET_SET_CONVARS { convars: Vec<(String, String)> },
+    NET_SET_CONVARS { convars: HashMap<String, String> },
     NET_SIGNON_STATE { state: u8, spawn_count: i32 },
 }
 
@@ -31,13 +32,13 @@ pub fn process_messages(reader: &mut BitReadStream<LittleEndian>) -> Vec<Message
             5 => {
                 let num: u8 = reader.read_int(8).unwrap();
 
-                let mut convars = Vec::with_capacity(num.into());
+                let mut convars = HashMap::with_capacity(num.into());
 
                 for _ in 0..num {
                     let key = reader.read_string(None).unwrap();
                     let value = reader.read_string(None).unwrap();
 
-                    convars.push((key.to_string(), value.to_string()));
+                    convars.insert(key.to_string(), value.to_string());
                 }
                 messages.push(Messages::NET_SET_CONVARS { convars });
             }
@@ -45,7 +46,7 @@ pub fn process_messages(reader: &mut BitReadStream<LittleEndian>) -> Vec<Message
             6 => {
                 let state: u8 = reader.read_int(8).unwrap();
                 let spawn_count: i32 =
-                    unsafe { std::mem::transmute::<u32, i32>(reader.read_int(32).unwrap()) };
+                    unsafe { mem::transmute::<u32, i32>(reader.read_int(32).unwrap()) };
 
                 messages.push(Messages::NET_SIGNON_STATE { state, spawn_count });
             }
