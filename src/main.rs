@@ -58,7 +58,11 @@ fn handle_request(
 
 fn main() {
     let mut clients = HashMap::<SocketAddr, Client>::new();
-    let mut log = OpenOptions::new().append(true).create(true).open("log.csv").unwrap();
+    let mut log = OpenOptions::new()
+        .append(true)
+        .create(true)
+        .open("log.csv")
+        .unwrap();
     let mut sock = UdpSocket::bind("0.0.0.0:27015").unwrap();
     loop {
         let mut buffer = vec![0; 1400];

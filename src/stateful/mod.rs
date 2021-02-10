@@ -37,10 +37,12 @@ pub fn handle_stateful(
 
     // Read header data
     let seq = u32::from_le_bytes(data[0..4].try_into().unwrap());
-    let ack = u32::from_le_bytes(data[4..8].try_into().unwrap());
+    let mut ack = u32::from_le_bytes(data[4..8].try_into().unwrap());
     let flags = data[8];
     let checksum = u16::from_le_bytes(data[9..11].try_into().unwrap());
     // Verify the checksum before we continue
+    //println!("{} != {} ?", checksum, valve_checksum((&data[11..])));
+    //println!("{:#?}", &data);
     if valve_checksum(&data[11..]) == checksum {
         let rel = data[11];
         let mut off = 12;
@@ -65,14 +67,92 @@ pub fn handle_stateful(
             victim.flip_rel(reader.read_int(3).unwrap());
             // Read both subchannels
             for _ in 0..2 {
-                handle_messages(parse_subchannel(&mut reader));
+                let msgs = parse_subchannel(&mut reader);
+                println!("{:#?}", &msgs);
+                let packets = build_packets(
+                    handle_messages(msgs),
+                    &mut ack,
+                    seq,
+                    rel,
+                    challenge.unwrap(),
+                );
+                for packet in packets {
+                    println!("Sending packet...");
+                    sock.send_to(&packet, addr).unwrap();
+                }
                 // TODO: Write data
             }
         }
-        handle_messages(process_messages(&mut reader));
+        let msgs = process_messages(&mut reader);
+        println!("{:#?}", &msgs);
+        let packets = build_packets(
+            handle_messages(msgs),
+            &mut ack,
+            seq,
+            rel,
+            challenge.unwrap(),
+        );
+        for packet in packets {
+            println!("Sending packet...");
+            sock.send_to(&packet, addr).unwrap();
+        }
     } else {
         println!("WARNING: Valve Checksum Failed!");
     }
+}
+
+fn build_packets(
+    messages: Vec<Messages>,
+    seq: &mut u32,
+    ack: u32,
+    rel: u8,
+    challenge: u32,
+) -> Vec<Vec<u8>> {
+    let mut packets = vec![];
+    *seq += 1;
+    // TODO: Compression for sent packets?
+
+    println!("Seq {}\nAck {}", seq, ack);
+
+    for message in messages {
+        let mut writer = BitWriteStream::new(LittleEndian);
+        match message {
+            Messages::NET_DISCONNECT { reason } => {
+                writer.write_int(1u8, 6).unwrap();
+                writer.write_string(&reason, None).unwrap();
+            }
+            Messages::SVC_PRINT { message } => {
+                writer.write_int(7u8, 6).unwrap();
+                writer.write_string(&message, None).unwrap();
+            }
+            Messages::SVC_STRING_CMD { command } => {
+                writer.write_int(4u8, 6).unwrap();
+                writer.write_string(&command, None);
+            }
+            _ => todo!("TODO: Serialize {:#?}", message),
+        }
+
+        // Encapsulate packet
+        let packet = writer.finish();
+        println!("Data: {:#?}", packet);
+
+        let body = [&[rel] as &[u8], &challenge.to_le_bytes(), &packet].concat();
+        println!("Body: {:#?}", body);
+
+        let full_packet = [
+            &seq.to_le_bytes() as &[u8],
+            &ack.to_le_bytes(),
+            &[0x20],
+            &valve_checksum(&body).to_le_bytes(),
+            &body,
+        ]
+        .concat();
+        println!("{:#?}", full_packet.clone());
+
+        packets.push(full_packet);
+    }
+
+    packets
 }
 
 fn handle_messages(messages: Vec<Messages>) -> Vec<Messages> {
@@ -81,20 +161,22 @@ fn handle_messages(messages: Vec<Messages>) -> Vec<Messages> {
         match msg {
             Messages::NET_SET_CONVARS { convars } => {
                 if let Some(method) = convars.get("cl_connectmethod") {
-                    if method == "" {
-                        // TODO: We're good!
+                    if method == "serverbrowser_favorites" {
+                        results.push(Messages::SVC_STRING_CMD {
+                            command: "redirect 206.221.183.218:27085".to_string(),
+                        });
                     } else {
                         results.push(Messages::NET_DISCONNECT {
-                            reason: "You must join this server from the favorites tab!".to_string()
+                            reason: "You must join this server from the favorites tab!".to_string(),
                         });
                     }
                 } else {
                     results.push(Messages::NET_DISCONNECT {
-                        reason: "You must join this server from the favorites tab!".to_string()
+                        reason: "You must join this server from the favorites tab!".to_string(),
                     });
                 }
             }
-            _ => println!("DEBUG: {:#?}", msg)
+            _ => println!("DEBUG: {:#?}", msg),
         }
     }
     results
@@ -105,6 +187,7 @@ fn parse_subchannel(reader: &mut BitReadStream<LittleEndian>) -> Vec<Messages> {
     if reader.read_bool().unwrap() {
         // Is this part of a multi-block structure?
         let multi = reader.read_bool().unwrap();
+        println!("Is multi: {}", multi);
         if multi {
             let start_fragment: u32 = reader.read_int(18).unwrap();
             let num_fragments: u8 = reader.read_int(3).unwrap();
@@ -149,10 +232,15 @@ fn parse_subchannel(reader: &mut BitReadStream<LittleEndian>) -> Vec<Messages> {
             // Finally, the message itself.
             let msg = reader.read_bytes(len).unwrap();
 
+            //let replacement =
+            //  std::fs::read("/home/nmcdaniel/Desktop/packet_deconstructor/out.txt").unwrap();
+
             let msg_buf = BitReadBuffer::new(&msg, LittleEndian);
             let mut msg_reader = BitReadStream::new(msg_buf);
 
-            process_messages(&mut msg_reader)
+            let msgs = process_messages(&mut msg_reader);
+            println!("{:#?}", &msgs);
+            msgs
         }
     } else {
         vec![]
