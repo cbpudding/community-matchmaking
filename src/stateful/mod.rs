@@ -5,7 +5,7 @@ use std::{
     net::{SocketAddr, UdpSocket},
 };
 
-use crate::Client;
+use crate::{Client, NetChannel};
 
 mod util;
 use util::*;
@@ -63,21 +63,20 @@ pub fn handle_stateful(
             // Check which bit in the reliable state we need to flip
             victim.flip_rel(reader.read_int(3).unwrap());
             // Read both subchannels
-            for _ in 0..2 {
-                let msgs = parse_subchannel(&mut reader);
+            for stream_num in 0..2 {
+                let msgs = parse_subchannel(&mut reader, &mut victim.netchannels[stream_num]);
                 println!("{:#?}", &msgs);
                 let packets = build_packets(
                     handle_messages(&mut victim, msgs),
                     &mut ack,
                     seq,
-                    rel,
+                    victim.reliable,
                     challenge.unwrap(),
                 );
                 for packet in packets {
                     println!("Sending packet...");
                     sock.send_to(&packet, addr).unwrap();
                 }
-                // TODO: Write data
             }
         }
         let msgs = process_messages(&mut reader);
@@ -126,6 +125,7 @@ fn build_packets(
                 writer.write_int(4u8, 6).unwrap();
                 writer.write_string(&command, None).unwrap();
             }
+            Messages::NET_NOP => {}
             _ => todo!("TODO: Serialize {:#?}", message),
         }
 
@@ -177,15 +177,18 @@ fn handle_messages(client: &mut Client, messages: Vec<Messages>) -> Vec<Messages
     results
 }
 
-fn parse_subchannel(reader: &mut BitReadStream<LittleEndian>) -> Vec<Messages> {
+fn parse_subchannel(
+    reader: &mut BitReadStream<LittleEndian>,
+    netchannel: &mut NetChannel,
+) -> Vec<Messages> {
     // Check if the subchannel exists
     if reader.read_bool().unwrap() {
         // Is this part of a multi-block structure?
         let multi = reader.read_bool().unwrap();
-        println!("Is multi: {}", multi);
         if multi {
             let start_fragment: u32 = reader.read_int(18).unwrap();
             let num_fragments: u8 = reader.read_int(3).unwrap();
+            println!("Start: {}, Num: {}", start_fragment, num_fragments);
 
             if start_fragment == 0 {
                 // Is the fragment a file?
@@ -207,12 +210,63 @@ fn parse_subchannel(reader: &mut BitReadStream<LittleEndian>) -> Vec<Messages> {
                     None
                 };
 
-                let length: u32 = reader.read_int(26).unwrap();
+                let total_length: u32 = reader.read_int(26).unwrap();
 
-                todo!("Multi-reading");
+                let mut total_fragments = total_length as usize / 256;
+                if total_length % 256 != 0 {
+                    total_fragments += 1;
+                }
+
+                *netchannel = NetChannel {
+                    fragments: vec![vec![]; total_fragments],
+                    num_fragments: total_fragments,
+                    compressed: compressed.is_some(),
+                    length: total_length as usize,
+                };
+
+                println!("len: {}", netchannel.fragments.len());
+                println!("tlen: {}", netchannel.length);
+
+                for i in 0..num_fragments {
+                    let fragment = reader.read_bytes(256).unwrap();
+                    netchannel.fragments[start_fragment as usize + i as usize] = fragment.to_vec();
+                }
+            } else if start_fragment as usize + num_fragments as usize == netchannel.num_fragments {
+                for i in 0..num_fragments - 1 {
+                    println!("Reading...");
+                    let fragment = reader.read_bytes(256).unwrap();
+                    netchannel.fragments[start_fragment as usize + i as usize] = fragment.to_vec();
+                }
+                netchannel.fragments[start_fragment as usize + num_fragments as usize - 1] =
+                    reader.read_bytes(netchannel.length % 256).unwrap().to_vec();
+            } else {
+                for i in 0..num_fragments {
+                    let fragment = reader.read_bytes(256).unwrap();
+                    netchannel.fragments[start_fragment as usize + i as usize] = fragment.to_vec();
+                }
             }
 
-            vec![]
+            // Check if all fragments have arived
+            let mut done = true;
+            for fragment in &netchannel.fragments {
+                if fragment.len() == 0 {
+                    done = false;
+                }
+            }
+            if done {
+                let mut data = vec![];
+                for fragment in &netchannel.fragments {
+                    data.extend(fragment);
+                }
+                let msg_buf = BitReadBuffer::new(&data, LittleEndian);
+                let mut msg_reader = BitReadStream::new(msg_buf);
+
+                let msgs = process_messages(&mut msg_reader);
+                println!("{:#?}", msgs);
+                msgs
+            } else {
+                vec![Messages::NET_NOP]
+            }
         } else {
             // Is the data compressed?
             let compressed = if reader.read_bool().unwrap() {
@@ -226,9 +280,6 @@ fn parse_subchannel(reader: &mut BitReadStream<LittleEndian>) -> Vec<Messages> {
             let len = read_varint(reader);
             // Finally, the message itself.
             let msg = reader.read_bytes(len).unwrap();
-
-            //let replacement =
-            //  std::fs::read("/home/nmcdaniel/Desktop/packet_deconstructor/out.txt").unwrap();
 
             let msg_buf = BitReadBuffer::new(&msg, LittleEndian);
             let mut msg_reader = BitReadStream::new(msg_buf);

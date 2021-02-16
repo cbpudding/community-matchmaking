@@ -9,6 +9,7 @@ license = "AGPL-3.0-only"
 a2s = "0.2.2"
 bitbuffer = "0.8.1"
 crc = "1.8.1"
+snap = "1.0.4"
 toml = "0.5.8"
 
 [dependencies.serde]

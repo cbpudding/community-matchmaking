@@ -4,6 +4,8 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
+use crate::matchmaking::MatchmakingConfig;
+
 pub fn generate_challenge() -> u32 {
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -12,7 +14,12 @@ pub fn generate_challenge() -> u32 {
     (now & 0xFFFFFFFF).try_into().unwrap()
 }
 
-pub fn handle_stateless(sock: &mut UdpSocket, addr: SocketAddr, data: &[u8]) -> u8 {
+pub fn handle_stateless(
+    config: &MatchmakingConfig,
+    sock: &mut UdpSocket,
+    addr: SocketAddr,
+    data: &[u8],
+) -> u8 {
     let mut response = Vec::new();
     match data[4] {
         0x54 => {
@@ -34,7 +41,7 @@ pub fn handle_stateless(sock: &mut UdpSocket, addr: SocketAddr, data: &[u8]) -> 
             response.push(0); // VAC Support(Disabled)
             response.extend_from_slice("0\0".as_bytes()); // Game version
             response.push(0xA1); // Extra Data Flags
-            response.extend_from_slice(&27016u16.to_le_bytes()); // Port number
+            response.extend_from_slice(&config.port().to_le_bytes()); // Port number
             response.extend_from_slice("breadpudding,matchmaking\0".as_bytes()); // Keywords
             response.extend_from_slice(&440u64.to_le_bytes()); // Game ID
         }

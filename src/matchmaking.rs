@@ -1,6 +1,6 @@
-use ::a2s::A2SClient;
-use ::serde::Deserialize;
-use ::std::{
+use a2s::A2SClient;
+use serde::Deserialize;
+use std::{
     collections::HashMap,
     error::Error,
     fmt::{self, Display, Formatter},
@@ -13,7 +13,7 @@ use crate::{stateful::messages::Messages, Client};
 #[derive(Deserialize)]
 struct GenericOptions {
     address: Ipv4Addr,
-    port: u16
+    port: u16,
 }
 
 impl GenericOptions {
@@ -25,12 +25,15 @@ impl GenericOptions {
 #[derive(Deserialize)]
 pub struct MatchmakingConfig {
     matchmaking: GenericOptions,
-    servers: HashMap<String, Server>
+    servers: HashMap<String, Server>,
 }
 
 impl MatchmakingConfig {
     pub fn bind_addr(&self) -> String {
         self.matchmaking.bind_addr()
+    }
+    pub fn port(&self) -> u16 {
+        self.matchmaking.port
     }
 }
 
@@ -84,7 +87,11 @@ impl Error for ServerError {
     }
 }
 
-pub fn matchmaking_tick(config: &MatchmakingConfig, last: &mut SystemTime, clients: &mut HashMap<SocketAddr, Client>) {
+pub fn matchmaking_tick(
+    config: &MatchmakingConfig,
+    last: &mut SystemTime,
+    clients: &mut HashMap<SocketAddr, Client>,
+) {
     let now = SystemTime::now();
     if now.duration_since(*last).unwrap().as_secs() >= 1 {
         *last = now;
@@ -101,7 +108,7 @@ pub fn matchmaking_tick(config: &MatchmakingConfig, last: &mut SystemTime, clien
         for p in players {
             println!("DEBUG(mm): Redirected!");
             p.queued.push(Messages::SVC_STRING_CMD {
-                command: format!("redirect {}:{}", servers[0].address, servers[0].port)
+                command: format!("redirect {}:{}", servers[0].address, servers[0].port),
             });
         }
     }

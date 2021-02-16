@@ -1,4 +1,4 @@
-use ::std::{
+use std::{
     collections::HashMap,
     convert::TryInto,
     fs::File,
@@ -6,6 +6,8 @@ use ::std::{
     net::{SocketAddr, UdpSocket},
     time::SystemTime,
 };
+
+use snap::raw::Decoder;
 
 mod matchmaking;
 use matchmaking::{matchmaking_tick, MatchmakingConfig};
@@ -16,7 +18,15 @@ use stateless::handle_stateless;
 mod stateful;
 use stateful::{handle_stateful, messages::Messages};
 
+pub struct NetChannel {
+    fragments: Vec<Vec<u8>>,
+    compressed: bool,
+    num_fragments: usize,
+    length: usize,
+}
+
 pub struct Client {
+    netchannels: [NetChannel; 2],
     queued: Vec<Messages>,
     reliable: u8,
     sent: bool,
@@ -38,6 +48,20 @@ impl Client {
         Self {
             queued: vec![],
             reliable: 0,
+            netchannels: [
+                NetChannel {
+                    fragments: vec![],
+                    num_fragments: 0,
+                    length: 0,
+                    compressed: false,
+                },
+                NetChannel {
+                    fragments: vec![],
+                    num_fragments: 0,
+                    length: 0,
+                    compressed: false,
+                },
+            ],
             sent: false,
         }
     }
@@ -49,6 +73,7 @@ impl Client {
 }
 
 fn handle_request(
+    config: &MatchmakingConfig,
     clients: &mut HashMap<SocketAddr, Client>,
     sock: &mut UdpSocket,
     addr: SocketAddr,
@@ -57,7 +82,12 @@ fn handle_request(
     if data.len() > 4 {
         let header = u32::from_le_bytes(data[0..4].try_into().unwrap());
         if header == 0xFFFFFFFF {
-            handle_stateless(sock, addr, data);
+            handle_stateless(config, sock, addr, data);
+        } else if header == 0xFFFFFFFD {
+            let mut decompressor = Decoder::new();
+            let decompressed = decompressor.decompress_vec(&data[8..]).unwrap();
+
+            handle_stateful(clients, sock, addr, &decompressed);
         } else if header != 0xFFFFFFFE {
             handle_stateful(clients, sock, addr, data);
         }
@@ -75,7 +105,7 @@ fn main() {
     loop {
         let mut buffer = vec![0; 1400];
         if let Ok((len, addr)) = sock.recv_from(&mut buffer) {
-            handle_request(&mut clients, &mut sock, addr, &buffer[..len]);
+            handle_request(&config, &mut clients, &mut sock, addr, &buffer[..len]);
             matchmaking_tick(&config, &mut last_tick, &mut clients);
         }
     }
