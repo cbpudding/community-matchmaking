@@ -1,20 +1,25 @@
-use std::{
+use ::std::{
     collections::HashMap,
     convert::TryInto,
-    fs::OpenOptions,
-    io::Write,
+    fs::File,
+    io::Read,
     net::{SocketAddr, UdpSocket},
     time::SystemTime,
 };
+
+mod matchmaking;
+use matchmaking::{matchmaking_tick, MatchmakingConfig};
 
 mod stateless;
 use stateless::handle_stateless;
 
 mod stateful;
-use stateful::handle_stateful;
+use stateful::{handle_stateful, messages::Messages};
 
 pub struct Client {
+    queued: Vec<Messages>,
     reliable: u8,
+    sent: bool,
 }
 
 impl Client {
@@ -23,16 +28,24 @@ impl Client {
         self.reliable ^= 1 << n;
     }
 
+    /// Returns whether the client has been sent to another server
+    pub fn been_sent(&self) -> bool {
+        self.sent
+    }
+
     /// Create a new client state
     pub fn new() -> Self {
-        Self { reliable: 0 }
+        Self {
+            queued: vec![],
+            reliable: 0,
+            sent: false,
+        }
     }
-}
 
-enum RequestType {
-    Unknown,
-    Stateless(u8),
-    Stateful,
+    /// Indicates that the client has been sent to another server
+    pub fn sent(&mut self) {
+        self.sent = true;
+    }
 }
 
 fn handle_request(
@@ -40,53 +53,30 @@ fn handle_request(
     sock: &mut UdpSocket,
     addr: SocketAddr,
     data: &[u8],
-) -> RequestType {
+) {
     if data.len() > 4 {
         let header = u32::from_le_bytes(data[0..4].try_into().unwrap());
         if header == 0xFFFFFFFF {
-            RequestType::Stateless(handle_stateless(sock, addr, data))
+            handle_stateless(sock, addr, data);
         } else if header != 0xFFFFFFFE {
             handle_stateful(clients, sock, addr, data);
-            RequestType::Stateful
-        } else {
-            RequestType::Unknown
         }
-    } else {
-        RequestType::Unknown
     }
 }
 
 fn main() {
+    let mut mm_config = File::open("matchmaking.toml").unwrap();
+    let mut buffer = String::new();
+    mm_config.read_to_string(&mut buffer).unwrap();
+    let config = ::toml::de::from_str::<MatchmakingConfig>(&buffer).unwrap();
     let mut clients = HashMap::<SocketAddr, Client>::new();
-    let mut log = OpenOptions::new()
-        .append(true)
-        .create(true)
-        .open("log.csv")
-        .unwrap();
-    let mut sock = UdpSocket::bind("0.0.0.0:27015").unwrap();
+    let mut sock = UdpSocket::bind(config.bind_addr()).unwrap();
+    let mut last_tick = SystemTime::now();
     loop {
         let mut buffer = vec![0; 1400];
         if let Ok((len, addr)) = sock.recv_from(&mut buffer) {
-            let start = SystemTime::now();
-            let kind = handle_request(&mut clients, &mut sock, addr, &buffer[..len]);
-            let time = SystemTime::now().duration_since(start).unwrap().as_micros();
-            match kind {
-                RequestType::Stateless(kind) => {
-                    println!(
-                        "{}: Stateless request({:#0x}) took {}\u{00B5}s",
-                        addr, kind, time
-                    );
-                    write!(log, "{},{:#0x},{}\n", addr, kind, time).unwrap();
-                }
-                RequestType::Stateful => {
-                    println!("{}: Stateful request took {}\u{00B5}s", addr, time);
-                    write!(log, "{},,{}\n", addr, time).unwrap();
-                }
-                RequestType::Unknown => {
-                    println!("{}: Unknown request took {}\u{00B5}s", addr, time);
-                    write!(log, "{},,{}\n", addr, time).unwrap();
-                }
-            }
+            handle_request(&mut clients, &mut sock, addr, &buffer[..len]);
+            matchmaking_tick(&config, &mut last_tick, &mut clients);
         }
     }
 }
