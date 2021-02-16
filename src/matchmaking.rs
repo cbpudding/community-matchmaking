@@ -55,11 +55,13 @@ impl Server {
     pub fn score(&self) -> Result<isize, Box<dyn Error>> {
         // Query server info
         let client = A2SClient::new().unwrap();
+        println!("Requesting info...");
         let info = client.info((self.address, self.port))?;
+        println!("Got {:#?}", info);
         // Score the server based on certain criteria
         let mut score = 0;
         // Reward servers for having players but reject full servers
-        if info.players < info.max_players {
+        if info.players >= info.max_players {
             return Err(Box::new(ServerError::ServerFull));
         } else if info.players >= 6 {
             score += info.players as isize;
@@ -107,6 +109,7 @@ pub fn matchmaking_tick(
         // TODO: Look for candidates and redirect
         for p in players {
             println!("DEBUG(mm): Redirected!");
+            println!("redirect {}:{}", servers[0].address, servers[0].port);
             p.queued.push(Messages::SVC_STRING_CMD {
                 command: format!("redirect {}:{}", servers[0].address, servers[0].port),
             });
