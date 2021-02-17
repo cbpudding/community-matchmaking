@@ -1,5 +1,6 @@
 use std::{
     convert::TryInto,
+    error::Error,
     net::{SocketAddr, UdpSocket},
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -11,7 +12,7 @@ pub fn generate_challenge() -> u32 {
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_secs();
-    (now & 0xFFFFFFFF).try_into().unwrap()
+    (now & 0xFFFFFFFF) as u32
 }
 
 pub fn handle_stateless(
@@ -19,7 +20,7 @@ pub fn handle_stateless(
     sock: &mut UdpSocket,
     addr: SocketAddr,
     data: &[u8],
-) -> u8 {
+) -> Result<(), Box<dyn Error>> {
     let mut response = Vec::new();
     match data[4] {
         0x54 => {
@@ -96,7 +97,7 @@ pub fn handle_stateless(
         _ => {}
     }
     if response.len() > 0 {
-        sock.send_to(&response, addr).unwrap();
+        sock.send_to(&response, addr)?;
     }
-    data[4]
+    Ok(())
 }

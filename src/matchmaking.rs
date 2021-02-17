@@ -1,4 +1,5 @@
 use a2s::A2SClient;
+use log::debug;
 use serde::Deserialize;
 use std::{
     collections::HashMap,
@@ -45,20 +46,10 @@ struct Server {
 }
 
 impl Server {
-    pub fn slots(&self) -> Result<usize, Box<dyn Error>> {
-        // Query server info
-        let client = A2SClient::new().unwrap();
-        let info = client.info((self.address, self.port))?;
-        // Return the number of empty slots on the server
-        Ok(info.max_players as usize - info.players as usize)
-    }
-
     pub fn score(&self) -> Result<isize, Box<dyn Error>> {
         // Query server info
         let client = A2SClient::new().unwrap();
-        println!("Requesting info...");
         let info = client.info((self.address, self.port))?;
-        println!("Got {:#?}", info);
         // Score the server based on certain criteria
         let mut score = 0;
         // Reward servers for having players but reject full servers
@@ -109,8 +100,7 @@ pub fn matchmaking_tick(
         let servers: Vec<&Server> = scored.iter().map(|v| v.0).collect();
         // TODO: Look for candidates and redirect
         for p in players {
-            println!("DEBUG(mm): Redirected!");
-            println!("redirect {}:{}", servers[0].address, servers[0].port);
+            debug!("redirect {}:{}", servers[0].address, servers[0].port);
             p.queued.push(Messages::SVC_STRING_CMD {
                 command: format!("redirect {}:{}", servers[0].address, servers[0].port),
             });
