@@ -1,6 +1,6 @@
-use std::error::Error;
 use bitbuffer::{BitReadBuffer, BitReadStream, BitWriteStream, LittleEndian};
-use log::{ error, debug, warn };
+use log::{debug, error, warn};
+use std::error::Error;
 use std::{
     collections::HashMap,
     convert::TryInto,
@@ -37,10 +37,10 @@ pub fn handle_stateful(
         }
     };
 
-	if data.len() < 16 {
-		error!("Received packet was smaller than expected");
-		return;
-	}
+    if data.len() < 16 {
+        error!("Received packet was smaller than expected");
+        return;
+    }
 
     // Read header data
     let seq = u32::from_le_bytes(data[0..4].try_into().unwrap());
@@ -64,53 +64,54 @@ pub fn handle_stateful(
             None
         };
 
-		// Challenge is required to send a reply
-		if challenge.is_none() {
-			error!("Stateful packet was missing challenge");
-			return;
-		}
+        // Challenge is required to send a reply
+        if challenge.is_none() {
+            error!("Stateful packet was missing challenge");
+            return;
+        }
 
-		let result = || -> Option<Vec<Messages>> {
-			let mut msgs = vec![];
-			
-			let read_buf = BitReadBuffer::new(&data[off..], LittleEndian);
-			let mut reader = BitReadStream::new(read_buf);
-			if flags & 0x01 != 0 {
-				// Check which bit in the reliable state we need to flip
-				victim.flip_rel(reader.read_int(3).ok()?);
-				// Read both subchannels
-				for stream_num in 0..2 {
-					msgs.extend(parse_subchannel(&mut reader, &mut victim.netchannels[stream_num]).ok()?);
-				}
-			}
-			msgs.extend(process_messages(&mut reader).ok()?);
-			
-			Some(msgs)
-		}();
+        let result = || -> Option<Vec<Messages>> {
+            let mut msgs = vec![];
 
-		if let Some(msgs) = result {
-			let packets = build_packets(
-				handle_messages(&mut victim, msgs),
-				&mut ack,
-				seq,
-				victim.reliable,
-				challenge.unwrap()
-			);
+            let read_buf = BitReadBuffer::new(&data[off..], LittleEndian);
+            let mut reader = BitReadStream::new(read_buf);
+            if flags & 0x01 != 0 {
+                // Check which bit in the reliable state we need to flip
+                victim.flip_rel(reader.read_int(3).ok()?);
+                // Read both subchannels
+                for stream_num in 0..2 {
+                    msgs.extend(
+                        parse_subchannel(&mut reader, &mut victim.netchannels[stream_num]).ok()?,
+                    );
+                }
+            }
+            msgs.extend(process_messages(&mut reader).ok()?);
 
-			for packet in packets {
-				println!("Sending packet...");
-				match sock.send_to(&packet, addr) {
-					Ok(_) => {},
-					Err(e) => {
-						error!("Failure to send packet: {}", e);
-					}
-				}
-			}
-		} else {
-			error!("Failed to parse packet data");
-		}
+            Some(msgs)
+        }();
+
+        if let Some(msgs) = result {
+            let packets = build_packets(
+                handle_messages(&mut victim, msgs),
+                &mut ack,
+                seq,
+                victim.reliable,
+                challenge.unwrap(),
+            );
+
+            for packet in packets {
+                match sock.send_to(&packet, addr) {
+                    Ok(_) => {}
+                    Err(e) => {
+                        error!("Failure to send packet: {}", e);
+                    }
+                }
+            }
+        } else {
+            error!("Failed to parse packet data");
+        }
     } else {
-		warn!("Valve checksum failed to verify");
+        warn!("Valve checksum failed to verify");
     }
 }
 
@@ -124,7 +125,7 @@ fn build_packets(
     let mut packets = vec![];
     *seq += 1;
 
-	let mut writer = BitWriteStream::new(LittleEndian);
+    let mut writer = BitWriteStream::new(LittleEndian);
     for message in messages {
         match message {
             Messages::NET_DISCONNECT { reason } => {
@@ -136,7 +137,6 @@ fn build_packets(
                 writer.write_string(&message, None).unwrap();
             }
             Messages::SVC_STRING_CMD { command } => {
-				println!("Building stringcmd");
                 writer.write_int(4u8, 6).unwrap();
                 writer.write_string(&command, None).unwrap();
             }
@@ -144,10 +144,10 @@ fn build_packets(
             _ => error!("Expected to serialize unknown message: {:#?}", message),
         }
     }
-	// Encapsulate packet
+    // Encapsulate packet
     let packet = writer.finish();
     let body = [&[rel] as &[u8], &challenge.to_le_bytes(), &packet].concat();
-	
+
     let full_packet = [
         &seq.to_le_bytes() as &[u8],
         &ack.to_le_bytes(),
@@ -155,10 +155,10 @@ fn build_packets(
         &valve_checksum(&body).to_le_bytes(),
         &body,
     ]
-        .concat();
-	
+    .concat();
+
     packets.push(full_packet);
-	
+
     packets
 }
 
@@ -181,7 +181,7 @@ fn handle_messages(client: &mut Client, messages: Vec<Messages>) -> Vec<Messages
                     });
                 }
             }
-            _ => {},
+            _ => {}
         }
     }
     results
@@ -203,10 +203,7 @@ fn parse_subchannel(
                 // Is the fragment a file?
                 let filename = if reader.read_bool()? {
                     // Tranfer id, filename
-                    Some((
-                        reader.read_int::<u32>(32)?,
-                        reader.read_string(None)?,
-                    ))
+                    Some((reader.read_int::<u32>(32)?, reader.read_string(None)?))
                 } else {
                     None
                 };
@@ -218,12 +215,12 @@ fn parse_subchannel(
                     None
                 };
 
-				if compressed.is_some() {
-					warn!("Client attempted to send compressed fragmented netchannel");
-					return Ok(vec![
+                if compressed.is_some() {
+                    warn!("Client attempted to send compressed fragmented netchannel");
+                    return Ok(vec![
 						Messages::NET_DISCONNECT { reason: "Your client sent data we couldn't understand. We will try to fix this soon!".to_string() }
 					]);
-				}
+                }
 
                 let total_length: u32 = reader.read_int(26)?;
 
@@ -239,21 +236,21 @@ fn parse_subchannel(
                     length: total_length as usize,
                 };
 
-				if total_fragments < num_fragments as usize {
-					error!("More fragments were received than expected");
-					return Ok(vec![]);
-				}
+                if total_fragments < num_fragments as usize {
+                    error!("More fragments were received than expected");
+                    return Ok(vec![]);
+                }
 
                 for i in 0..num_fragments {
                     let fragment = reader.read_bytes(256)?;
                     netchannel.fragments[start_fragment as usize + i as usize] = fragment.to_vec();
                 }
             } else if start_fragment as usize + num_fragments as usize == netchannel.num_fragments {
-				if netchannel.fragments.len() < start_fragment as usize + num_fragments as usize {
-					error!("More fragments were received than expected");
-					return Ok(vec![]);
-				}
-				
+                if netchannel.fragments.len() < start_fragment as usize + num_fragments as usize {
+                    error!("More fragments were received than expected");
+                    return Ok(vec![]);
+                }
+
                 for i in 0..num_fragments - 1 {
                     let fragment = reader.read_bytes(256)?;
                     netchannel.fragments[start_fragment as usize + i as usize] = fragment.to_vec();
@@ -261,11 +258,11 @@ fn parse_subchannel(
                 netchannel.fragments[start_fragment as usize + num_fragments as usize - 1] =
                     reader.read_bytes(netchannel.length % 256)?.to_vec();
             } else {
-				if netchannel.fragments.len() < start_fragment as usize + num_fragments as usize {
-					error!("More fragments were received than expected");
-					return Ok(vec![]);
-				}
-				
+                if netchannel.fragments.len() < start_fragment as usize + num_fragments as usize {
+                    error!("More fragments were received than expected");
+                    return Ok(vec![]);
+                }
+
                 for i in 0..num_fragments {
                     let fragment = reader.read_bytes(256)?;
                     netchannel.fragments[start_fragment as usize + i as usize] = fragment.to_vec();
@@ -300,12 +297,12 @@ fn parse_subchannel(
                 None
             };
 
-			if compressed.is_some() {
-				warn!("Client attempted to send compressed single block netchannel");
-				return Ok(vec![
+            if compressed.is_some() {
+                warn!("Client attempted to send compressed single block netchannel");
+                return Ok(vec![
 					Messages::NET_DISCONNECT { reason: "Your client sent data we couldn't understand. We will try to fix this soon!".to_string() }
 				]);
-			}
+            }
 
             // What is the length of the message?
             let len = read_varint(reader)?;

@@ -1,6 +1,6 @@
-use std::error::Error;
 use bitbuffer::{BitReadStream, LittleEndian};
-use log::{ error };
+use log::error;
+use std::error::Error;
 use std::{collections::HashMap, mem};
 
 #[derive(Debug)]
@@ -56,7 +56,9 @@ pub enum KeyValueTypes {
     TypeNumtypes,
 }
 
-pub fn process_messages(reader: &mut BitReadStream<LittleEndian>) -> Result<Vec<Messages>, Box<dyn Error>> {
+pub fn process_messages(
+    reader: &mut BitReadStream<LittleEndian>,
+) -> Result<Vec<Messages>, Box<dyn Error>> {
     let mut messages = vec![];
 
     loop {
@@ -91,15 +93,14 @@ pub fn process_messages(reader: &mut BitReadStream<LittleEndian>) -> Result<Vec<
             // NET_SIGNON_STATE
             6 => {
                 let state: u8 = reader.read_int(8)?;
-                let spawn_count: i32 =
-                    unsafe { mem::transmute::<u32, i32>(reader.read_int(32)?) };
+                let spawn_count: i32 = unsafe { mem::transmute::<u32, i32>(reader.read_int(32)?) };
 
                 messages.push(Messages::NET_SIGNON_STATE { state, spawn_count });
             }
             _ => {
-				error!("An unknown message typ was encountered: {}", msg_type);
-				return Ok(vec![]);
-			},
+                error!("An unknown message typ was encountered: {}", msg_type);
+                return Ok(vec![]);
+            }
         };
     }
 
