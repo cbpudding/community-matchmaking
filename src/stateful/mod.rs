@@ -91,11 +91,12 @@ pub fn handle_stateful(
         }();
 
         if let Some(msgs) = result {
+            let reliable = victim.reliable;
             let packets = build_packets(
-                handle_messages(&mut victim, msgs),
+                handle_messages(clients, addr, msgs),
                 &mut ack,
                 seq,
-                victim.reliable,
+                reliable,
                 challenge.unwrap(),
             );
 
@@ -162,17 +163,25 @@ fn build_packets(
     packets
 }
 
-fn handle_messages(client: &mut Client, messages: Vec<Messages>) -> Vec<Messages> {
+fn handle_messages(clients: &mut HashMap<SocketAddr, Client>, addr: SocketAddr, messages: Vec<Messages>) -> Vec<Messages> {
     let mut results = Vec::new();
+    let client = match clients.get_mut(&addr) {
+        Some(c) => c,
+        None => {
+            warn!("Attempt to handle messages for client that doesn't exist");
+            return vec![]
+        }
+    };
     for msg in messages {
         match msg {
             Messages::NET_DISCONNECT { reason } => {
-                info!("{} disconnected({})", if let Some(name) = client.name() {
-                    name
+                if let Some(name) = client.name() {
+                    info!("{} disconnected({})", name, reason);
                 } else {
-                    String::from("An unknown client")
-                }, reason);
-                // TODO: Remove Client from the HashMap
+                    warn!("An unknown client disconnected({})", reason);
+                }
+                clients.remove(&addr);
+                return vec![];
             }
             Messages::NET_SET_CONVARS { convars } => {
                 if let Some(name) = convars.get("name") {
