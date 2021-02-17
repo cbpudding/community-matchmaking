@@ -1,3 +1,6 @@
+use ::chrono::Local;
+use ::fern::Dispatch;
+use ::log::LevelFilter;
 use std::{
     collections::HashMap,
     convert::TryInto,
@@ -95,6 +98,20 @@ fn handle_request(
 }
 
 fn main() {
+    Dispatch::new()
+        .format(|out, message, record| {
+            out.finish(format_args!(
+                "[{}][{}][{}] {}",
+                Local::now().format("%H:%M:%S%.3f"),
+                record.target(),
+                record.level(),
+                message
+            ))
+        })
+        .level(LevelFilter::Info)
+        .chain(::std::io::stderr())
+        .apply()
+        .unwrap();
     let mut mm_config = File::open("matchmaking.toml").unwrap();
     let mut buffer = String::new();
     mm_config.read_to_string(&mut buffer).unwrap();

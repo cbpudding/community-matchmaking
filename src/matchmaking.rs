@@ -32,6 +32,7 @@ impl MatchmakingConfig {
     pub fn bind_addr(&self) -> String {
         self.matchmaking.bind_addr()
     }
+
     pub fn port(&self) -> u16 {
         self.matchmaking.port
     }
