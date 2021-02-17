@@ -1,9 +1,10 @@
 use ::chrono::Local;
 use ::fern::Dispatch;
-use ::log::LevelFilter;
+use ::log::{error, info, LevelFilter};
 use std::{
     collections::HashMap,
     convert::TryInto,
+    error::Error,
     fs::File,
     io::Read,
     net::{SocketAddr, UdpSocket},
@@ -81,20 +82,20 @@ fn handle_request(
     sock: &mut UdpSocket,
     addr: SocketAddr,
     data: &[u8],
-) {
+) -> Result<(), Box<dyn Error>> {
     if data.len() > 4 {
         let header = u32::from_le_bytes(data[0..4].try_into().unwrap());
         if header == 0xFFFFFFFF {
-            handle_stateless(config, sock, addr, data);
+            handle_stateless(config, sock, addr, data)?;
         } else if header == 0xFFFFFFFD {
             let mut decompressor = Decoder::new();
-            let decompressed = decompressor.decompress_vec(&data[8..]).unwrap();
-
+            let decompressed = decompressor.decompress_vec(&data[8..])?;
             handle_stateful(clients, sock, addr, &decompressed);
         } else if header != 0xFFFFFFFE {
             handle_stateful(clients, sock, addr, data);
         }
     }
+    Ok(())
 }
 
 fn main() {
@@ -122,7 +123,9 @@ fn main() {
     loop {
         let mut buffer = vec![0; 1400];
         if let Ok((len, addr)) = sock.recv_from(&mut buffer) {
-            handle_request(&config, &mut clients, &mut sock, addr, &buffer[..len]);
+            if let Err(e) = handle_request(&config, &mut clients, &mut sock, addr, &buffer[..len]) {
+                error!("{}", e);
+            }
             matchmaking_tick(&config, &mut last_tick, &mut clients);
         }
     }
