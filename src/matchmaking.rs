@@ -13,12 +13,17 @@ use crate::{stateful::messages::Messages, Client};
 #[derive(Deserialize)]
 struct GenericOptions {
     address: Ipv4Addr,
+    hostname: String,
     port: u16,
 }
 
 impl GenericOptions {
-    pub fn bind_addr(&self) -> String {
-        format!("{}:{}", self.address, self.port)
+    pub fn bind_addr(&self) -> (Ipv4Addr, u16) {
+        (self.address, self.port)
+    }
+
+    pub fn hostname(&self) -> String {
+        self.hostname
     }
 }
 
@@ -29,12 +34,12 @@ pub struct MatchmakingConfig {
 }
 
 impl MatchmakingConfig {
-    pub fn bind_addr(&self) -> String {
+    pub fn bind_addr(&self) -> (Ipv4Addr, u16) {
         self.matchmaking.bind_addr()
     }
 
-    pub fn port(&self) -> u16 {
-        self.matchmaking.port
+    pub fn hostname(&self) -> String {
+        self.matchmaking.hostname()
     }
 }
 
