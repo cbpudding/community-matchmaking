@@ -1,5 +1,5 @@
 use a2s::A2SClient;
-use log::debug;
+use log::{debug, warn};
 use serde::Deserialize;
 use std::{
     collections::HashMap,
@@ -9,7 +9,7 @@ use std::{
     time::SystemTime,
 };
 
-use crate::{stateful::messages::Messages, Client};
+use crate::{stateful::messages::Messages, Client, ClientState};
 
 #[derive(Deserialize)]
 struct GenericOptions {
@@ -104,11 +104,18 @@ pub fn matchmaking_tick(
         scored.sort_by(|a, b| b.1.cmp(&a.1));
         let servers: Vec<&Server> = scored.iter().map(|v| v.0).collect();
         // TODO: Look for candidates and redirect
-        for p in players {
-            debug!("redirect {}:{}", servers[0].address, servers[0].port);
-            p.queued.push(Messages::SVC_STRING_CMD {
-                command: format!("redirect {}:{}", servers[0].address, servers[0].port),
-            });
+        if servers.len() > 0 {
+            for p in players {
+                if p.state == ClientState::Confirmed {
+                    debug!("redirect {}:{}", servers[0].address, servers[0].port);
+                    p.queued.push(Messages::SVC_STRING_CMD {
+                        command: format!("redirect {}:{}", servers[0].address, servers[0].port),
+                    });
+                    p.state = ClientState::Redirected;
+                }
+            }
+        } else {
+            warn!("No servers to send players to!");
         }
     }
 }

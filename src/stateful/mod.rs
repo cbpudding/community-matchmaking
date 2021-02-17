@@ -1,5 +1,5 @@
 use bitbuffer::{BitReadBuffer, BitReadStream, BitWriteStream, LittleEndian};
-use log::{debug, error, warn};
+use log::{debug, error, info, warn};
 use std::error::Error;
 use std::{
     collections::HashMap,
@@ -7,7 +7,7 @@ use std::{
     net::{SocketAddr, UdpSocket},
 };
 
-use crate::{Client, NetChannel};
+use crate::{Client, ClientState, NetChannel};
 
 mod util;
 use util::*;
@@ -166,10 +166,24 @@ fn handle_messages(client: &mut Client, messages: Vec<Messages>) -> Vec<Messages
     let mut results = Vec::new();
     for msg in messages {
         match msg {
+            Messages::NET_DISCONNECT { reason } => {
+                info!("{} disconnected({})", if let Some(name) = client.name() {
+                    name
+                } else {
+                    String::from("An unknown client")
+                }, reason);
+                // TODO: Remove Client from the HashMap
+            }
             Messages::NET_SET_CONVARS { convars } => {
+                if let Some(name) = convars.get("name") {
+                    client.set_name(name.to_string());
+                    info!("{} joined", name);
+                } else {
+                    warn!("An unknown client joined");
+                }
                 if let Some(method) = convars.get("cl_connectmethod") {
                     if method == "serverbrowser_favorites" {
-                        results.append(&mut client.queued);
+                        client.state = ClientState::Confirmed;
                     } else {
                         results.push(Messages::NET_DISCONNECT {
                             reason: "You must join this server from the favorites tab!".to_string(),
@@ -183,6 +197,9 @@ fn handle_messages(client: &mut Client, messages: Vec<Messages>) -> Vec<Messages
             }
             _ => {}
         }
+    }
+    if let Some(r) = client.queued.pop() {
+        results.push(r);
     }
     results
 }

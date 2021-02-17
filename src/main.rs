@@ -30,10 +30,11 @@ pub struct NetChannel {
 }
 
 pub struct Client {
+    name: Option<String>,
     netchannels: [NetChannel; 2],
     queued: Vec<Messages>,
     reliable: u8,
-    sent: bool,
+    pub state: ClientState,
 }
 
 impl Client {
@@ -42,14 +43,15 @@ impl Client {
         self.reliable ^= 1 << n;
     }
 
-    /// Returns whether the client has been sent to another server
-    pub fn been_sent(&self) -> bool {
-        self.sent
+    /// Returns the name of the client
+    pub fn name(&self) -> Option<String> {
+        self.name.clone()
     }
 
     /// Create a new client state
     pub fn new() -> Self {
         Self {
+            name: None,
             queued: vec![],
             reliable: 0,
             netchannels: [
@@ -66,14 +68,22 @@ impl Client {
                     compressed: false,
                 },
             ],
-            sent: false,
+            state: ClientState::Fresh,
         }
     }
 
-    /// Indicates that the client has been sent to another server
-    pub fn sent(&mut self) {
-        self.sent = true;
+    /// Sets the name of the client
+    pub fn set_name(&mut self, name: String) {
+        self.name = Some(name);
     }
+}
+
+/// The state the client is currently in
+#[derive(PartialEq)]
+pub enum ClientState {
+    Fresh, // New client, hasn't been confirmed yet.
+    Confirmed, // Confirmed to have joined from the favorites tab.
+    Redirected, // The client has been redirected to another server.
 }
 
 fn handle_request(
@@ -110,7 +120,11 @@ fn main() {
                 message
             ))
         })
-        .level(LevelFilter::Info)
+        .level(if cfg!(debug_assertions) {
+            LevelFilter::Debug
+        } else {
+            LevelFilter::Info
+        })
         .chain(::std::io::stderr())
         .apply()
         .unwrap();
