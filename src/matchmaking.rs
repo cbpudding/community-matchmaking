@@ -45,14 +45,6 @@ struct Server {
 }
 
 impl Server {
-    pub fn slots(&self) -> Result<usize, Box<dyn Error>> {
-        // Query server info
-        let client = A2SClient::new().unwrap();
-        let info = client.info((self.address, self.port))?;
-        // Return the number of empty slots on the server
-        Ok(info.max_players as usize - info.players as usize)
-    }
-
     pub fn score(&self) -> Result<isize, Box<dyn Error>> {
         // Query server info
         let client = A2SClient::new().unwrap();
