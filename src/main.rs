@@ -30,6 +30,7 @@ pub struct NetChannel {
 }
 
 pub struct Client {
+    joined: SystemTime,
     name: Option<String>,
     netchannels: [NetChannel; 2],
     queued: Vec<Messages>,
@@ -43,6 +44,11 @@ impl Client {
         self.reliable ^= 1 << n;
     }
 
+    /// Return the time the client joined
+    pub fn joined(&self) -> SystemTime {
+        self.joined
+    }
+
     /// Returns the name of the client
     pub fn name(&self) -> Option<String> {
         self.name.clone()
@@ -51,6 +57,7 @@ impl Client {
     /// Create a new client state
     pub fn new() -> Self {
         Self {
+            joined: SystemTime::now(),
             name: None,
             queued: vec![],
             reliable: 0,

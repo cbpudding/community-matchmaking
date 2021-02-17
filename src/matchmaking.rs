@@ -95,7 +95,8 @@ pub fn matchmaking_tick(
     if now.duration_since(*last).unwrap().as_secs() >= 1 {
         *last = now;
         let mut scored = Vec::new();
-        let players: Vec<&mut Client> = clients.values_mut().collect();
+        let mut players: Vec<&mut Client> = clients.values_mut().collect();
+        players.sort_by(|a, b| b.joined().cmp(&a.joined()));
         for server in config.servers.values() {
             if let Ok(s) = server.score() {
                 scored.push((server, s));
@@ -103,7 +104,6 @@ pub fn matchmaking_tick(
         }
         scored.sort_by(|a, b| b.1.cmp(&a.1));
         let servers: Vec<&Server> = scored.iter().map(|v| v.0).collect();
-        // TODO: Look for candidates and redirect
         if servers.len() > 0 {
             for p in players {
                 if p.state == ClientState::Confirmed {
