@@ -1,6 +1,5 @@
 [matchmaking]
 address = "0.0.0.0"
-hostname = "Community Matchmaking Beta"
 port = 27016
 
 [servers]

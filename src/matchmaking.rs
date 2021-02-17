@@ -13,17 +13,12 @@ use crate::{stateful::messages::Messages, Client};
 #[derive(Deserialize)]
 struct GenericOptions {
     address: Ipv4Addr,
-    hostname: String,
     port: u16,
 }
 
 impl GenericOptions {
-    pub fn bind_addr(&self) -> (Ipv4Addr, u16) {
-        (self.address, self.port)
-    }
-
-    pub fn hostname(&self) -> String {
-        self.hostname
+    pub fn bind_addr(&self) -> String {
+        format!("{}:{}", self.address, self.port)
     }
 }
 
@@ -34,12 +29,12 @@ pub struct MatchmakingConfig {
 }
 
 impl MatchmakingConfig {
-    pub fn bind_addr(&self) -> (Ipv4Addr, u16) {
+    pub fn bind_addr(&self) -> String {
         self.matchmaking.bind_addr()
     }
 
-    pub fn hostname(&self) -> String {
-        self.matchmaking.hostname()
+    pub fn port(&self) -> u16 {
+        self.matchmaking.port
     }
 }
 
@@ -50,6 +45,14 @@ struct Server {
 }
 
 impl Server {
+    pub fn slots(&self) -> Result<usize, Box<dyn Error>> {
+        // Query server info
+        let client = A2SClient::new().unwrap();
+        let info = client.info((self.address, self.port))?;
+        // Return the number of empty slots on the server
+        Ok(info.max_players as usize - info.players as usize)
+    }
+
     pub fn score(&self) -> Result<isize, Box<dyn Error>> {
         // Query server info
         let client = A2SClient::new().unwrap();

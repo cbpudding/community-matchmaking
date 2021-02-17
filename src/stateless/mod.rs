@@ -1,6 +1,5 @@
 use std::{
     convert::TryInto,
-    error::Error,
     net::{SocketAddr, UdpSocket},
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -12,7 +11,7 @@ pub fn generate_challenge() -> u32 {
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_secs();
-    (now & 0xFFFFFFFF) as u32
+    (now & 0xFFFFFFFF).try_into().unwrap()
 }
 
 pub fn handle_stateless(
@@ -20,7 +19,7 @@ pub fn handle_stateless(
     sock: &mut UdpSocket,
     addr: SocketAddr,
     data: &[u8],
-) -> Result<(), Box<dyn Error>> {
+) -> u8 {
     let mut response = Vec::new();
     match data[4] {
         0x54 => {
@@ -28,7 +27,7 @@ pub fn handle_stateless(
             response.extend_from_slice(&[0xFF, 0xFF, 0xFF, 0xFF]);
             response.push(0x49); // Type
             response.push(0x11); // Protocol version
-            response.extend_from_slice(format!("{}\0", config.hostname()).as_bytes()); // Server name
+            response.extend_from_slice("Community Matchmaking Beta\0".as_bytes()); // Server name
             response.extend_from_slice("matchmaking\0".as_bytes());
             response.extend_from_slice("tf\0".as_bytes()); // Game folder
             response.extend_from_slice("Team Fortress 2\0".as_bytes()); // Game name
@@ -42,7 +41,7 @@ pub fn handle_stateless(
             response.push(0); // VAC Support(Disabled)
             response.extend_from_slice("0\0".as_bytes()); // Game version
             response.push(0xA1); // Extra Data Flags
-            response.extend_from_slice(&config.bind_addr().1.to_le_bytes()); // Port number
+            response.extend_from_slice(&config.port().to_le_bytes()); // Port number
             response.extend_from_slice("breadpudding,matchmaking\0".as_bytes()); // Keywords
             response.extend_from_slice(&440u64.to_le_bytes()); // Game ID
         }
@@ -97,7 +96,7 @@ pub fn handle_stateless(
         _ => {}
     }
     if response.len() > 0 {
-        sock.send_to(&response, addr)?;
+        sock.send_to(&response, addr).unwrap();
     }
-    Ok(())
+    data[4]
 }
