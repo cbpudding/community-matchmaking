@@ -44,9 +44,11 @@ impl MatchmakingConfig {
     }
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Hash)]
 struct Server {
     address: Ipv4Addr,
+    bias: isize,
+    name: Option<String>,
     port: u16,
 }
 
@@ -65,6 +67,7 @@ impl Server {
         }
         score -= (info.max_players as isize - 24).abs(); // Punish servers from straying from the 24 maxplayer limit
         score -= info.bots as isize; // Remove one point per bot
+        score += self.bias; // Apply bias
         Ok(score)
     }
 }
