@@ -7,21 +7,11 @@ use std::{collections::HashMap, mem};
 #[allow(non_camel_case_types)]
 pub enum Messages {
     NET_NOP,
-    NET_DISCONNECT {
-        reason: String,
-    },
-    NET_SET_CONVARS {
-        convars: HashMap<String, String>,
-    },
-    NET_SIGNON_STATE {
-        state: u8,
-        spawn_count: i32,
-    },
-
-    SVC_PRINT {
-        message: String,
-    },
-    SVC_SERVER_INFO {
+    NET_DISCONNECT { reason: String },
+    NET_SET_CONVARS { convars: HashMap<String, String> },
+    NET_SIGNON_STATE { state: u8, spawn_count: i32 },
+    SVC_PRINT { message: String },
+    /*SVC_SERVER_INFO {
         protocol: u16,
         server_count: u32,
         hltv: bool,
@@ -37,23 +27,8 @@ pub enum Messages {
         sky_name: String,
         host_name: String,
         replay: bool,
-    },
-    SVC_STRING_CMD {
-        command: String,
-    },
-}
-
-#[repr(u8)]
-pub enum KeyValueTypes {
-    TypeNone = 0,
-    TypeString,
-    TypeInt,
-    TypeFloat,
-    TypePtr,
-    TypeWstring,
-    TypeColor,
-    TypeUint64,
-    TypeNumtypes,
+    },*/
+    SVC_STRING_CMD { command: String },
 }
 
 pub fn process_messages(

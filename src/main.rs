@@ -6,10 +6,11 @@ use std::{
     convert::TryInto,
     error::Error,
     fs::File,
-    io::Read,
-    net::{SocketAddr, UdpSocket},
+    io::{self, Read},
+    net::SocketAddr,
     time::SystemTime,
 };
+use tokio::net::UdpSocket;
 
 use snap::raw::Decoder;
 
@@ -24,7 +25,6 @@ use stateful::{handle_stateful, messages::Messages};
 
 pub struct NetChannel {
     fragments: Vec<Vec<u8>>,
-    compressed: bool,
     num_fragments: usize,
     length: usize,
 }
@@ -66,13 +66,11 @@ impl Client {
                     fragments: vec![],
                     num_fragments: 0,
                     length: 0,
-                    compressed: false,
                 },
                 NetChannel {
                     fragments: vec![],
                     num_fragments: 0,
                     length: 0,
-                    compressed: false,
                 },
             ],
             state: ClientState::Fresh,
@@ -88,12 +86,12 @@ impl Client {
 /// The state the client is currently in
 #[derive(PartialEq)]
 pub enum ClientState {
-    Fresh, // New client, hasn't been confirmed yet.
-    Confirmed, // Confirmed to have joined from the favorites tab.
+    Fresh,      // New client, hasn't been confirmed yet.
+    Confirmed,  // Confirmed to have joined from the favorites tab.
     Redirected, // The client has been redirected to another server.
 }
 
-fn handle_request(
+async fn handle_request(
     config: &MatchmakingConfig,
     clients: &mut HashMap<SocketAddr, Client>,
     sock: &mut UdpSocket,
@@ -103,20 +101,20 @@ fn handle_request(
     if data.len() > 4 {
         let header = u32::from_le_bytes(data[0..4].try_into().unwrap());
         if header == 0xFFFFFFFF {
-            handle_stateless(config, sock, addr, data)?;
+            handle_stateless(config, sock, addr, data).await?;
         } else if header == 0xFFFFFFFD {
             let mut decompressor = Decoder::new();
             let decompressed = decompressor.decompress_vec(&data[8..])?;
-
-            handle_stateful(clients, sock, addr, &decompressed);
+            handle_stateful(clients, sock, addr, &decompressed).await;
         } else if header != 0xFFFFFFFE {
-            handle_stateful(clients, sock, addr, data);
+            handle_stateful(clients, sock, addr, data).await;
         }
     }
     Ok(())
 }
 
-fn main() {
+#[tokio::main]
+async fn main() {
     Dispatch::new()
         .format(|out, message, record| {
             out.finish(format_args!(
@@ -132,7 +130,7 @@ fn main() {
         } else {
             LevelFilter::Info
         })
-        .chain(::std::io::stderr())
+        .chain(io::stderr())
         .apply()
         .unwrap();
     let mut mm_config = File::open("matchmaking.toml").unwrap();
@@ -140,12 +138,14 @@ fn main() {
     mm_config.read_to_string(&mut buffer).unwrap();
     let config = ::toml::de::from_str::<MatchmakingConfig>(&buffer).unwrap();
     let mut clients = HashMap::<SocketAddr, Client>::new();
-    let mut sock = UdpSocket::bind(config.bind_addr()).unwrap();
+    let mut sock = UdpSocket::bind(config.bind_addr()).await.unwrap();
     let mut last_tick = SystemTime::now();
     loop {
         let mut buffer = vec![0; 1400];
-        if let Ok((len, addr)) = sock.recv_from(&mut buffer) {
-            if let Err(e) = handle_request(&config, &mut clients, &mut sock, addr, &buffer[..len]) {
+        if let Ok((len, addr)) = sock.recv_from(&mut buffer).await {
+            if let Err(e) =
+                handle_request(&config, &mut clients, &mut sock, addr, &buffer[..len]).await
+            {
                 error!("{}", e);
             }
             matchmaking_tick(&config, &mut last_tick, &mut clients);

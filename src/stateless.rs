@@ -1,9 +1,10 @@
 use std::{
     convert::TryInto,
     error::Error,
-    net::{SocketAddr, UdpSocket},
+    net::SocketAddr,
     time::{SystemTime, UNIX_EPOCH},
 };
+use tokio::net::UdpSocket;
 
 use crate::matchmaking::MatchmakingConfig;
 
@@ -15,7 +16,7 @@ pub fn generate_challenge() -> u32 {
     (now & 0xFFFFFFFF) as u32
 }
 
-pub fn handle_stateless(
+pub async fn handle_stateless(
     config: &MatchmakingConfig,
     sock: &mut UdpSocket,
     addr: SocketAddr,
@@ -97,7 +98,7 @@ pub fn handle_stateless(
         _ => {}
     }
     if response.len() > 0 {
-        sock.send_to(&response, addr)?;
+        sock.send_to(&response, addr).await?;
     }
     Ok(())
 }

@@ -1,11 +1,8 @@
 use bitbuffer::{BitReadBuffer, BitReadStream, BitWriteStream, LittleEndian};
-use log::{debug, error, info, warn};
+use log::{error, info, warn};
 use std::error::Error;
-use std::{
-    collections::HashMap,
-    convert::TryInto,
-    net::{SocketAddr, UdpSocket},
-};
+use std::{collections::HashMap, convert::TryInto, net::SocketAddr};
+use tokio::net::UdpSocket;
 
 use crate::{Client, ClientState, NetChannel};
 
@@ -15,14 +12,14 @@ use util::*;
 pub mod messages;
 use messages::{process_messages, Messages};
 
-pub fn handle_stateful(
+pub async fn handle_stateful(
     clients: &mut HashMap<SocketAddr, Client>,
     sock: &mut UdpSocket,
     addr: SocketAddr,
     data: &[u8],
 ) {
     // Get the client/victim
-    let mut victim = match clients.get_mut(&addr) {
+    let victim = match clients.get_mut(&addr) {
         Some(victim) => victim,
         None => {
             // Welcome our client to netchannel
@@ -30,7 +27,7 @@ pub fn handle_stateful(
             buffer.extend_from_slice(&[0xFF, 0xFF, 0xFF, 0xFF]);
             buffer.push(0x42); // Type
             buffer.extend_from_slice("00000000000000\0".as_bytes()); // Padding
-            sock.send_to(&buffer, addr).unwrap();
+            sock.send_to(&buffer, addr).await.unwrap();
             // Create the client state since one doesn't exist
             clients.insert(addr, Client::new());
             clients.get_mut(&addr).unwrap()
@@ -49,7 +46,7 @@ pub fn handle_stateful(
     let checksum = u16::from_le_bytes(data[9..11].try_into().unwrap());
     // Verify the checksum before we continue
     if valve_checksum(&data[11..]) == checksum {
-        let rel = data[11];
+        // let rel = data[11];
         let mut off = 12;
         let _choked = if flags & 0x10 != 0 {
             off += 1;
@@ -101,7 +98,7 @@ pub fn handle_stateful(
             );
 
             for packet in packets {
-                match sock.send_to(&packet, addr) {
+                match sock.send_to(&packet, addr).await {
                     Ok(_) => {}
                     Err(e) => {
                         error!("Failure to send packet: {}", e);
@@ -163,13 +160,17 @@ fn build_packets(
     packets
 }
 
-fn handle_messages(clients: &mut HashMap<SocketAddr, Client>, addr: SocketAddr, messages: Vec<Messages>) -> Vec<Messages> {
+fn handle_messages(
+    clients: &mut HashMap<SocketAddr, Client>,
+    addr: SocketAddr,
+    messages: Vec<Messages>,
+) -> Vec<Messages> {
     let mut results = Vec::new();
     let client = match clients.get_mut(&addr) {
         Some(c) => c,
         None => {
             warn!("Attempt to handle messages for client that doesn't exist");
-            return vec![]
+            return vec![];
         }
     };
     for msg in messages {
@@ -227,7 +228,7 @@ fn parse_subchannel(
 
             if start_fragment == 0 {
                 // Is the fragment a file?
-                let filename = if reader.read_bool()? {
+                let _filename = if reader.read_bool()? {
                     // Tranfer id, filename
                     Some((reader.read_int::<u32>(32)?, reader.read_string(None)?))
                 } else {
@@ -258,7 +259,6 @@ fn parse_subchannel(
                 *netchannel = NetChannel {
                     fragments: vec![vec![]; total_fragments],
                     num_fragments: total_fragments,
-                    compressed: compressed.is_some(),
                     length: total_length as usize,
                 };
 
