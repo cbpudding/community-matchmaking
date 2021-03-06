@@ -107,7 +107,7 @@ pub fn matchmaking_tick(
         if servers.len() > 0 {
             for p in players {
                 if p.state == ClientState::Confirmed {
-                    debug!("redirect {}:{}", servers[0].address, servers[0].port);
+                    debug!("Redirecting {:?} to {}:{}", p.name(), servers[0].address, servers[0].port);
                     p.queued.push(Messages::SVC_STRING_CMD {
                         command: format!("redirect {}:{}", servers[0].address, servers[0].port),
                     });

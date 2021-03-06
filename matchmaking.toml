@@ -1,10 +1,38 @@
 [matchmaking]
 address = "0.0.0.0"
 hostname = "Community Matchmaking Beta"
-port = 27016
+port = 27015
 
 [servers]
 
-[servers.breadpudding]
-address = "24.198.95.249"
+[servers.blackwonder-2fort-us]
+address = "85.117.240.3"
+port = 27030
+
+[servers.gflclan-2fort-us]
+address = "92.119.148.19"
+port = 27015
+
+[servers.panda-community-harvest-us]
+address = "193.38.251.16"
+port = 27015
+
+[servers.panda-community-turbine-us]
+address = "193.38.251.6"
+port = 27015
+
+[servers.skial-harvest-us]
+address = "91.216.250.18"
+port = 27015
+
+[servers.skial-payload-plus-us]
+address = "91.216.250.11"
+port = 27015
+
+[servers.ugctf-2fort-eu]
+address = "193.221.192.26"
+port = 27015
+
+[servers.ugctf-degrootkeep-us]
+address = "45.141.52.12"
 port = 27015
