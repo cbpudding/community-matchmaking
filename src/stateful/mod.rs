@@ -1,5 +1,5 @@
 use bitbuffer::{BitReadBuffer, BitReadStream, BitWriteStream, LittleEndian};
-use log::{error, info, warn};
+use log::{debug, error, warn};
 use std::error::Error;
 use std::{collections::HashMap, convert::TryInto, net::SocketAddr};
 use tokio::net::UdpSocket;
@@ -177,7 +177,7 @@ fn handle_messages(
         match msg {
             Messages::NET_DISCONNECT { reason } => {
                 if let Some(name) = client.name() {
-                    info!("{} disconnected({})", name, reason);
+                    debug!("{} disconnected({})", name, reason);
                 } else {
                     warn!("An unknown client disconnected({})", reason);
                 }
@@ -187,7 +187,7 @@ fn handle_messages(
             Messages::NET_SET_CONVARS { convars } => {
                 if let Some(name) = convars.get("name") {
                     client.set_name(name.to_string());
-                    info!("{} joined", name);
+                    debug!("{} joined", name);
                 } else {
                     warn!("An unknown client joined");
                 }

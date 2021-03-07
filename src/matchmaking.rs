@@ -1,5 +1,5 @@
 use a2s::A2SClient;
-use log::{debug, warn};
+use log::{info, warn};
 use serde::Deserialize;
 use std::{
     collections::HashMap,
@@ -110,7 +110,7 @@ pub fn matchmaking_tick(
         if servers.len() > 0 {
             for p in players {
                 if p.state == ClientState::Confirmed {
-                    debug!(
+                    info!(
                         "Redirecting {:?} to {}:{}",
                         p.name(),
                         servers[0].address,
